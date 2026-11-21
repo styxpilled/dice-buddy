@@ -1,7 +1,7 @@
 export function formatPercent(p: number): string {
   if (p === 0) return "0%";
   const x = p * 100;
-  if (x < 0.01) return "<0.01%";
+  if (x < 0.01) return x >= 1e-6 ? `${Number(x.toPrecision(2))}%` : "<0.000001%";
   return `${Number(x.toFixed(x >= 10 ? 1 : 2))}%`;
 }
 
@@ -20,3 +20,5 @@ export function niceStep(raw: number): number {
   const mag = 10 ** Math.floor(Math.log10(raw));
   return [1, 2, 5, 10].map((k) => k * mag).find((s) => s >= raw)!;
 }
+
+export type Scale = "auto" | "linear" | "log";

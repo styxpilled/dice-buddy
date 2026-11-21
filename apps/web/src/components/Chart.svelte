@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { formatPercent, niceStep, type ChartSeries } from "./format";
+  import { formatPercent, niceStep, type ChartSeries, type Scale } from "./format";
 
-  let { series, stacked }: { series: ChartSeries[]; stacked: boolean } = $props();
+  let { series, stacked, scale }: { series: ChartSeries[]; stacked: boolean; scale: Scale } = $props();
+
+  const MAX_DECADES = 6;
 
   const height = 320;
   const m = { top: 12, right: 8, bottom: 28, left: 52 };
-  let width = $state(640);
+  /** Unknown until mounted, so the prerendered page leaves the chart area empty. */
+  let width = $state(0);
   let hover = $state<number | null>(null);
 
   const xs = $derived([...new Set(series.flatMap((s) => [...s.values.keys()]))].sort((a, b) => a - b));
@@ -23,13 +26,43 @@
       ? series.reduce((sum, s) => sum + (s.values.get(x) ?? 0), 0)
       : Math.max(0, ...series.map((s) => s.values.get(x) ?? 0));
 
-  const ticks = $derived.by(() => {
-    const top = Math.max(1e-12, ...xs.map(columnTotal));
-    const step = niceStep(top / 4);
-    return Array.from({ length: Math.ceil(top / step) + 1 }, (_, i) => i * step);
+  const totals = $derived(xs.map(columnTotal));
+
+  /**
+   * Auto uses log when the tallest column is more than 10 times the next tallest,
+   * and there are more than two columns (a yes/no chart reads better as linear).
+   */
+  const log = $derived.by(() => {
+    if (scale !== "auto") return scale === "log";
+    if (totals.length <= 2) return false;
+    let first = 0;
+    let second = 0;
+    for (const t of totals) {
+      if (t > first) [first, second] = [t, first];
+      else if (t > second) second = t;
+    }
+    return second > 0 && first / second > 10;
   });
-  const yMax = $derived(ticks[ticks.length - 1]!);
-  const y = (p: number) => m.top + plotH - (p / yMax) * plotH;
+
+  const axis = $derived.by(() => {
+    const top = Math.max(1e-12, ...totals);
+    if (log) {
+      const hi = Math.ceil(Math.log10(top));
+      const minPositive = Math.min(...totals.filter((t) => t > 0));
+      const lo = Math.max(hi - MAX_DECADES, Math.floor(Math.log10(minPositive)));
+      const ticks = Array.from({ length: hi - lo + 1 }, (_, i) => 10 ** (lo + i));
+      return { ticks, lo, hi };
+    }
+    const step = niceStep(top / 4);
+    const ticks = Array.from({ length: Math.ceil(top / step) + 1 }, (_, i) => i * step);
+    return { ticks, lo: 0, hi: ticks[ticks.length - 1]! };
+  });
+
+  const y = (p: number) => {
+    const { lo, hi } = axis;
+    const f = log ? (p > 0 ? Math.max(0, (Math.log10(p) - lo) / (hi - lo)) : 0) : p / hi;
+    return m.top + plotH - f * plotH;
+  };
 
   const xOfValue = (v: number) => m.left + ((v - lo + 0.5) / span) * plotW;
   /** Center of the value at index `i`. */
@@ -161,10 +194,11 @@
     }, 0);
 </script>
 
-<div class="chart" bind:clientWidth={width}>
+<div class="chart" style:height="{height}px" bind:clientWidth={width}>
+  {#if width}
   <svg {width} {height} role="img" aria-label="Probability of each result">
-    {#each ticks as t}
-      <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} class={t === 0 ? "axis" : "grid"} />
+    {#each axis.ticks as t, i}
+      <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} class={i === 0 ? "axis" : "grid"} />
       <text x={m.left - 8} y={y(t)} dy="0.32em" text-anchor="end">{formatPercent(t)}</text>
     {/each}
 
@@ -204,8 +238,9 @@
       onpointerleave={() => (hover = null)}
     />
   </svg>
+  {/if}
 
-  {#if hover !== null}
+  {#if hover !== null && width}
     {@const value = xs[hover]!}
     {@const cx = xAt(hover)}
     <div class="tooltip" style:left="{cx}px" class:flip={cx > width / 2}>

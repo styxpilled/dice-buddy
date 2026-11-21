@@ -16,25 +16,32 @@ attack.distribution().outcomes(); // [{ value, probability, byLabel: { "", fail,
 attack.roll(); // { total: 9, label: "", text: "d20 [14] + 5 AC 15 → success: 1d8 [6] + 3" }
 ```
 
+### Errors and limits
+
+- Syntax errors throw a `ParseError` with a `position`.
+- `distribution()` and `roll()` throw a `RangeError` on division by zero, on a
+  negative dice count, on more than 10,000 dice, and on a result range wider
+  than 10,000,000 values.
+
 ## Syntax
 
 Operators have standard precedence: comparisons are lowest, then `+ -`, then
 `* /`.
 
-| Syntax                                       | Meaning                                                                     |
-| -------------------------------------------- | --------------------------------------------------------------------------- |
-| `d20`, `3d6`, `(d4)d6`                       | Dice. The count can be a roll.                                              |
-| `4kh3d6`, `4d6kh3`, `2kl1d20`                | Keep the highest or lowest dice.                                            |
-| `d20ro1`, `2d6ro<3`                          | Reroll a die once when it matches.                                          |
-| `+ - * /`                                    | Arithmetic. `/` rounds down.                                                |
-| `AC DC >= > <= < = !=`                       | Comparison. 1 when true, 0 when false. `AC` and `DC` mean `>=`, but `AC` uses natural rolls (see below). |
-| `test ? a : b`                               | `a` when the test is not 0, else `b`. Without `: b`, else 0.                |
-| `test ? a crit x`, `crit[2] x`               | `x` when the left side of the test rolls its highest (or 2 highest) values. |
-| `adv(x)`, `dis(x)`, `max(a, b)`, `min(a, b)` | Functions.                                                                  |
+| Syntax                                       | Notes                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `d20`, `3d6`, `(d4)d6`                       | count can be a roll                                                                         |
+| `4kh3d6`, `4d6kh3`, `2kl1d20`                | keep the highest or lowest dice                                                             |
+| `d20ro1`, `2d6ro<3`                          | reroll a die once when it matches                                                           |
+| `+ - * /`                                    | `/` rounds down                                                                             |
+| `AC DC >= > <= < = !=`                       | 1 when true, 0 when false; `AC` and `DC` mean `>=`, but `AC` uses natural rolls (see below) |
+| `test ? a : b`                               | `a` when the test is not 0, else `b` (or 0 if no `: b`)                                     |
+| `test ? a crit x`, `crit[2] x`               | `x` when the left side of the test rolls its highest (or 2 highest) values                  |
+| `adv(x)`, `dis(x)`, `max(a, b)`, `min(a, b)` |                                                                                             |
 
-With natural rolls, `AC` always fails when its left side rolls its lowest
-value (a natural 1) and always succeeds on its highest value (a natural 20).
-They are on by default. Turn them off with `parse(src, { naturalRolls: false })`.
+With natural rolls, `AC` always fails when its left side rolls its lowest value
+(a natural 1) and always succeeds on its highest value (a natural 20). They are
+on by default. Turn them off with `parse(src, { naturalRolls: false })`.
 
 Outcomes from a `crit` branch have the label `crit`. Outcomes from a failed test
 have the label `fail`. Labels stay on the outcomes through later operations, so
@@ -42,17 +49,8 @@ a chart can show them in a different color.
 
 ## Extending
 
-Operators and functions come from registries. The parser reads them, so a new
-entry is available at once:
-
 ```ts
-import {
-  defineFunction,
-  defineOperator,
-  Distribution,
-  Pmf,
-  PRECEDENCE,
-} from "dice-buddy";
+import { defineFunction, defineOperator, PRECEDENCE } from "dice-buddy";
 
 defineOperator("%", {
   symbol: "%",
@@ -71,7 +69,7 @@ defineFunction("abs", {
 });
 ```
 
-## How it is fast
+## Performance
 
 - Distributions are dense arrays of float probabilities, so they do not
   overflow.
@@ -87,7 +85,3 @@ pnpm test      # core tests
 pnpm dev       # website at http://localhost:4321
 pnpm build     # library and website
 ```
-
-The website deploys to GitHub Pages from `main`
-(`.github/workflows/deploy.yml`). Set Pages to use GitHub Actions in the
-repository settings.
