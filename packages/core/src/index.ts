@@ -26,8 +26,8 @@ export class Expression {
     return this.evaluator.dist(this.ast);
   }
 
-  roll(rng: Rng = Math.random): RollResult {
-    const r = new Roller(rng, this.evaluator).roll(this.ast);
+  roll(rng?: Rng): RollResult {
+    const r = new Roller(this.evaluator, rng).roll(this.ast);
     return { total: r.value, label: r.label, text: r.text };
   }
 }

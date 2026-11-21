@@ -2,13 +2,15 @@ import type { CondNode, DiceNode, Node } from "./ast.js";
 import { mergeLabels, type Label } from "./distribution.js";
 import { applyNatural, checkCount, critThreshold, operatorOf, type Evaluator } from "./evaluate.js";
 import { functions, operators, type Rolled } from "./operators.js";
+import { cryptoUint32, uniformDie } from "./random.js";
 
+/** A custom source of random numbers in [0, 1), for example a seeded one for tests. */
 export type Rng = () => number;
 
 export class Roller {
   constructor(
-    private readonly rng: Rng,
     private readonly evaluator: Evaluator,
+    private readonly rng?: Rng,
   ) {}
 
   roll(node: Node): Rolled {
@@ -43,7 +45,7 @@ export class Roller {
   }
 
   private die(sides: number): number {
-    return 1 + Math.floor(this.rng() * sides);
+    return this.rng ? 1 + Math.floor(this.rng() * sides) : uniformDie(sides, cryptoUint32);
   }
 
   private dice(node: DiceNode): Rolled {
