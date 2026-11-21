@@ -95,6 +95,25 @@ describe("distribution", () => {
     expect(mean("d20 + 5 AC 15 ? 1d8 + 3 : 0 crit[2] 2d8 + 3")).toBeCloseTo(0.1 * 12 + 0.45 * 7.5);
   });
 
+  it("applies natural rolls for AC only", () => {
+    expect(prob("d20 + 20 AC 15", 1)).toBeCloseTo(0.95);
+    expect(prob("d20 AC 30", 1)).toBeCloseTo(0.05);
+    expect(prob("15 AC 10", 1)).toBe(1);
+    expect(prob("d20 + 20 DC 15", 1)).toBeCloseTo(1);
+    expect(prob("d20 + 20 >= 15", 1)).toBeCloseTo(1);
+    expect(prob("2d20 AC 2", 0)).toBeCloseTo(1 / 400);
+    expect(mean("d20 + 20 AC 15 ? 10 crit 20")).toBeCloseTo(0.05 * 20 + 0.9 * 10);
+    expect(mean("d1 AC 0 ? 10 crit 20")).toBe(20);
+    expect(mean("d20 AC 30 ? 10 crit[2] 20")).toBeCloseTo(0.1 * 20);
+  });
+
+  it("turns natural rolls off", () => {
+    const off = { naturalRolls: false };
+    expect(parse("d20 + 20 AC 15", off).distribution().pmf().get(1)).toBeCloseTo(1);
+    expect(parse("d20 AC 30", off).distribution().pmf().get(1)).toBe(0);
+    expect(parse("d20 + 20 AC 15 ? 1 : 0", off).roll(seeded(1)).total).toBe(1);
+  });
+
   it("models a save for half damage", () => {
     expect(mean("d20 + 3 DC 15 ? 8d6 / 2 : 8d6")).toBeCloseTo(0.45 * 13.75 + 0.55 * 28);
   });
@@ -146,6 +165,9 @@ describe("roll", () => {
       "adv(d20) + 3",
       "d20 + 5 AC 15 ? 1d8 + 3 : 1 crit[2] 2d8 + 3",
       "d20 + 3 DC 15 ? 8d6 / 2 : 8d6",
+      "d20 + 20 AC 15 ? 10 : 1 crit 20",
+      "(d20 + 20 AC 15) * 7",
+      "d20 AC 30 ? 5 : 1",
       "d4d6",
       "2d6ro<3",
       "max(d6, d8) - d4",

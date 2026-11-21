@@ -1,6 +1,6 @@
 import type { Node } from "./ast.js";
 import type { Distribution, Label } from "./distribution.js";
-import { Evaluator } from "./evaluate.js";
+import { Evaluator, type Options } from "./evaluate.js";
 import { parseNode } from "./parser.js";
 import { Roller, type Rng } from "./roll.js";
 
@@ -12,12 +12,15 @@ export interface RollResult {
 }
 
 export class Expression {
-  private readonly evaluator = new Evaluator();
+  private readonly evaluator: Evaluator;
 
   constructor(
     readonly source: string,
     readonly ast: Node,
-  ) {}
+    options: Options = {},
+  ) {
+    this.evaluator = new Evaluator(options);
+  }
 
   distribution(): Distribution {
     return this.evaluator.dist(this.ast);
@@ -29,11 +32,12 @@ export class Expression {
   }
 }
 
-export function parse(source: string): Expression {
-  return new Expression(source, parseNode(source));
+export function parse(source: string, options: Options = {}): Expression {
+  return new Expression(source, parseNode(source), options);
 }
 
 export type { Node } from "./ast.js";
+export type { Options } from "./evaluate.js";
 export { Distribution, LABELS, type Label, type Outcome } from "./distribution.js";
 export { ParseError } from "./parser.js";
 export { Pmf } from "./pmf.js";

@@ -1,9 +1,17 @@
 <script lang="ts">
-  import { LABELS, parse, type Distribution, type Label, type Pmf, type RollResult } from "dice-buddy";
+  import {
+    LABELS,
+    parse,
+    type Distribution,
+    type Label,
+    type Pmf,
+    type RollResult,
+  } from "dice-buddy";
   import Chart from "./Chart.svelte";
-  import { formatNumber, formatPercent, type ChartSeries } from "./format";
+  import { formatNumber, formatPercent, niceStep, type ChartSeries } from "./format";
 
   const MAX_EXPRESSIONS = 4;
+  const MAX_TABLE_ROWS = 200;
   const EXAMPLES = [
     "d20",
     "4kh3d6",
@@ -18,13 +26,27 @@
     ["4kh3d6, 4d6kh3, 2kl1d20", "Keep the highest or lowest dice."],
     ["d20ro1, 2d6ro<3", "Reroll a die once when it matches."],
     ["+ - * /", "Arithmetic. / rounds down."],
-    ["AC DC >= > <= < = !=", "Comparison. Gives 1 when true, 0 when false."],
+    [
+      "AC DC >= > <= < = !=",
+      "Comparison. Gives 1 when true, 0 when false. With natural rolls on, AC always fails on the lowest roll (a natural 1) and always succeeds on the highest (a natural 20).",
+    ],
     ["test ? a : b", "a when the test is not 0, else b. Without : b, else 0."],
-    ["... crit x, crit[2] x", "x when the left side of the test rolls its highest (or 2 highest) values."],
+    [
+      "... crit x, crit[2] x",
+      "x when the left side of the test rolls its highest (or 2 highest) values.",
+    ],
     ["adv(x), dis(x), max(a, b), min(a, b)", "Functions."],
   ];
-  const LABEL_NAMES: Record<Label, string> = { "": "Normal", fail: "Fail", crit: "Crit" };
-  const LABEL_COLORS: Record<Label, string> = { "": "var(--series-1)", fail: "var(--series-3)", crit: "var(--series-2)" };
+  const LABEL_NAMES: Record<Label, string> = {
+    "": "Normal",
+    fail: "Fail",
+    crit: "Crit",
+  };
+  const LABEL_COLORS: Record<Label, string> = {
+    "": "var(--series-1)",
+    fail: "var(--series-3)",
+    crit: "var(--series-2)",
+  };
 
   interface Result {
     src: string;
@@ -34,14 +56,20 @@
   }
 
   function fromUrl(): string[] {
-    const list = new URLSearchParams(location.search).getAll("e").filter(Boolean).slice(0, MAX_EXPRESSIONS);
+    const list = new URLSearchParams(location.search)
+      .getAll("e")
+      .filter(Boolean)
+      .slice(0, MAX_EXPRESSIONS);
     return list.length ? list : ["d20"];
   }
 
   let inputs = $state(fromUrl());
   let settled = $state(fromUrl());
+  let natural = $state(new URLSearchParams(location.search).get("n") !== "0");
   let tableOpen = $state(false);
-  let rolls = $state<Record<number, { src: string; result: RollResult } | undefined>>({});
+  let rolls = $state<
+    Record<number, { src: string; result: RollResult } | undefined>
+  >({});
 
   $effect(() => {
     const next = [...inputs];
@@ -53,6 +81,8 @@
     const url = new URL(location.href);
     url.searchParams.delete("e");
     for (const e of settled) url.searchParams.append("e", e);
+    if (natural) url.searchParams.delete("n");
+    else url.searchParams.set("n", "0");
     history.replaceState(null, "", url);
   });
 
@@ -60,10 +90,15 @@
     settled.map((src) => {
       if (!src.trim()) return { src, dist: null, pmf: null, error: null };
       try {
-        const dist = parse(src).distribution();
+        const dist = parse(src, { naturalRolls: natural }).distribution();
         return { src, dist, pmf: dist.pmf(), error: null };
       } catch (e) {
-        return { src, dist: null, pmf: null, error: e instanceof Error ? e.message : String(e) };
+        return {
+          src,
+          dist: null,
+          pmf: null,
+          error: e instanceof Error ? e.message : String(e),
+        };
       }
     }),
   );
@@ -87,14 +122,35 @@
     }));
   });
 
-  const tableValues = $derived(
-    [...new Set(results.flatMap((r) => (r.pmf ? [...r.pmf].map(([v]) => v) : [])))].sort((a, b) => a - b),
-  );
+  /** Large distributions get one row per range of values. */
+  const tableRows = $derived.by(() => {
+    const values = [...new Set(results.flatMap((r) => (r.pmf ? [...r.pmf].map(([v]) => v) : [])))].sort(
+      (a, b) => a - b,
+    );
+    if (values.length <= MAX_TABLE_ROWS) {
+      return values.map((v) => ({ label: String(v), cells: results.map((r) => r.pmf?.get(v) ?? 0) }));
+    }
+    const lo = values[0]!;
+    const step = niceStep((values[values.length - 1]! - lo + 1) / MAX_TABLE_ROWS);
+    const start = Math.floor(lo / step) * step;
+    const rows = new Map<number, number[]>();
+    results.forEach((r, j) => {
+      for (const [v, p] of r.pmf ?? []) {
+        const b = Math.floor((v - start) / step);
+        let row = rows.get(b);
+        if (!row) rows.set(b, (row = results.map(() => 0)));
+        row[j]! += p;
+      }
+    });
+    return [...rows]
+      .sort((a, b) => a[0] - b[0])
+      .map(([b, cells]) => ({ label: `${start + b * step} to ${start + (b + 1) * step - 1}`, cells }));
+  });
 
   function roll(i: number) {
     const src = inputs[i]!;
     try {
-      rolls[i] = { src, result: parse(src).roll() };
+      rolls[i] = { src, result: parse(src, { naturalRolls: natural }).roll() };
     } catch {
       rolls[i] = undefined;
     }
@@ -129,9 +185,17 @@
           spellcheck="false"
           autocomplete="off"
         />
-        <button class="primary" onclick={() => roll(i)} disabled={!!r?.error}>Roll</button>
+        <button class="primary" onclick={() => roll(i)} disabled={!!r?.error}>
+          Roll
+        </button>
         {#if !single}
-          <button class="icon" onclick={() => remove(i)} aria-label="Remove expression {i + 1}">×</button>
+          <button
+            class="icon"
+            onclick={() => remove(i)}
+            aria-label="Remove expression {i + 1}"
+          >
+            ×
+          </button>
         {/if}
       </div>
       {#if r?.error}
@@ -144,7 +208,11 @@
         </p>
       {/if}
       {#if rolled}
-        <p class="roll" class:crit={rolled.label === "crit"} class:fail={rolled.label === "fail"}>
+        <p
+          class="roll"
+          class:crit={rolled.label === "crit"}
+          class:fail={rolled.label === "fail"}
+        >
           <b>{rolled.total}</b>
           <code>{rolled.text}</code>
         </p>
@@ -158,40 +226,52 @@
     {/if}
   </div>
 
-  {#if series.length}
-    <div class="card">
+  <div class="card">
+    <div class="toolbar">
+      <label class="toggle">
+        <input type="checkbox" bind:checked={natural} />
+        <span class="trim">Natural rolls (AC)</span>
+      </label>
       {#if series.length > 1}
         <ul class="legend">
           {#each series as s}
-            <li><span class="swatch" style:background={s.color}></span>{s.name}</li>
+            <li>
+              <span class="swatch" style:background={s.color}></span><span class="trim">{s.name}</span>
+            </li>
           {/each}
         </ul>
       {/if}
-      <Chart {series} stacked={single} />
     </div>
-  {/if}
+    {#if series.length}
+      <Chart {series} stacked={single} />
+    {:else}
+      <div class="empty"></div>
+    {/if}
+  </div>
 
   <details bind:open={tableOpen}>
     <summary>Table</summary>
     {#if tableOpen}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Result</th>
-            {#each results as r}<th>{single ? "Probability" : r.src}</th>{/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each tableValues as v}
+      <div class="table-wrap">
+        <table>
+          <thead>
             <tr>
-              <td>{v}</td>
-              {#each results as r}<td>{formatPercent(r.pmf?.get(v) ?? 0)}</td>{/each}
+              <th>Result</th>
+              {#each results as r}<th>
+                  {single ? "Probability" : r.src}
+                </th>{/each}
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {#each tableRows as row}
+              <tr>
+                <td>{row.label}</td>
+                {#each row.cells as p}<td>{formatPercent(p)}</td>{/each}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
     {/if}
   </details>
 
@@ -207,7 +287,9 @@
 
   <div class="examples">
     {#each EXAMPLES as ex}
-      <button class="chip" onclick={() => (inputs[0] = ex)}><code>{ex}</code></button>
+      <button class="chip" onclick={() => (inputs[0] = ex)}>
+        <code>{ex}</code>
+      </button>
     {/each}
   </div>
 </main>
@@ -318,8 +400,29 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 16px 16px 8px;
+    padding: 12px 16px 8px;
     margin-bottom: 16px;
+  }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 16px;
+    min-height: 20px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+  .toggle input {
+    margin: 0;
+    accent-color: var(--accent);
   }
   .legend {
     display: flex;
@@ -327,9 +430,14 @@
     gap: 6px 16px;
     list-style: none;
     padding: 0;
-    margin: 0 0 8px;
-    font-size: 13px;
-    color: var(--ink-2);
+    margin: 0;
+  }
+  .empty {
+    height: 320px;
+  }
+  /* Trim the text box to the cap height, so that centering uses the visible letters. */
+  .trim {
+    text-box: trim-both cap alphabetic;
   }
   .legend li {
     display: flex;

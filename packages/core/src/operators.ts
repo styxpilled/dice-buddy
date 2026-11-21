@@ -7,6 +7,11 @@ export interface BinaryOperator {
   /** Higher binds tighter. */
   precedence: number;
   comparison?: boolean;
+  /**
+   * With the `naturalRolls` option, the lowest value of the left side always
+   * gives 0 (a natural 1 misses) and the highest always gives 1 (a natural 20 hits).
+   */
+  natural?: boolean;
   apply(a: number, b: number): number;
   /** Optional fast path for distributions. */
   pmf?(a: Pmf, b: Pmf): Pmf;
@@ -68,9 +73,9 @@ defineOperator("/", {
   },
 });
 
-const comparisons: [string[], string, (a: number, b: number) => boolean][] = [
+const comparisons: [string[], string, (a: number, b: number) => boolean, boolean?][] = [
   [[">="], ">=", (a, b) => a >= b],
-  [["ac"], "AC", (a, b) => a >= b],
+  [["ac"], "AC", (a, b) => a >= b, true],
   [["dc"], "DC", (a, b) => a >= b],
   [[">"], ">", (a, b) => a > b],
   [["<="], "<=", (a, b) => a <= b],
@@ -78,12 +83,13 @@ const comparisons: [string[], string, (a: number, b: number) => boolean][] = [
   [["=", "=="], "=", (a, b) => a === b],
   [["!="], "!=", (a, b) => a !== b],
 ];
-for (const [tokens, symbol, test] of comparisons) {
+for (const [tokens, symbol, test, natural] of comparisons) {
   for (const token of tokens) {
     defineOperator(token, {
       symbol,
       precedence: PRECEDENCE.comparison,
       comparison: true,
+      natural,
       apply: (a, b) => (test(a, b) ? 1 : 0),
     });
   }

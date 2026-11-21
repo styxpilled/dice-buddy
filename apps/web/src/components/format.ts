@@ -14,3 +14,9 @@ export interface ChartSeries {
   color: string;
   values: Map<number, number>;
 }
+
+/** The smallest 1, 2 or 5 times a power of ten that is at least `raw`. */
+export function niceStep(raw: number): number {
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  return [1, 2, 5, 10].map((k) => k * mag).find((s) => s >= raw)!;
+}

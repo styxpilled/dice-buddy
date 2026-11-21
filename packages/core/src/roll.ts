@@ -1,6 +1,6 @@
 import type { CondNode, DiceNode, Node } from "./ast.js";
 import { mergeLabels, type Label } from "./distribution.js";
-import { checkCount, critThreshold, operatorOf, type Evaluator } from "./evaluate.js";
+import { applyNatural, checkCount, critThreshold, operatorOf, type Evaluator } from "./evaluate.js";
 import { functions, operators, type Rolled } from "./operators.js";
 
 export type Rng = () => number;
@@ -28,7 +28,7 @@ export class Roller {
         const l = this.roll(node.left);
         const r = this.roll(node.right);
         return {
-          value: op.apply(l.value, r.value),
+          value: applyNatural(op, l.value, r.value, this.evaluator.naturalRange(op, node.left)),
           label: mergeLabels(l.label, r.label),
           text: `${l.text} ${op.symbol} ${r.text}`,
         };
@@ -96,7 +96,10 @@ export class Roller {
       testText = `${l.text} ${op.symbol} ${r.text}`;
       const threshold = critThreshold(this.evaluator.dist(node.test.left).pmf(), node.crit.top);
       if (l.value >= threshold) outcome = "crit";
-      else outcome = op.apply(l.value, r.value) ? "success" : "failure";
+      else {
+        const range = this.evaluator.naturalRange(op, node.test.left);
+        outcome = applyNatural(op, l.value, r.value, range) ? "success" : "failure";
+      }
     } else {
       const t = this.roll(node.test);
       testText = t.text;

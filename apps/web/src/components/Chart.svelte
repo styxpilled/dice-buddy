@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { formatPercent, type ChartSeries } from "./format";
+  import { formatPercent, niceStep, type ChartSeries } from "./format";
 
   let { series, stacked }: { series: ChartSeries[]; stacked: boolean } = $props();
 
@@ -13,6 +13,10 @@
   const plotH = height - m.top - m.bottom;
   const band = $derived(plotW / Math.max(1, xs.length));
   const gap = $derived(band >= 6 ? 2 : 0);
+  /** Too many values for one bar each: draw one shape per series instead. */
+  const dense = $derived(band < 3);
+  const lo = $derived(xs[0] ?? 0);
+  const span = $derived((xs[xs.length - 1] ?? 0) - lo + 1);
 
   const columnTotal = (x: number) =>
     stacked
@@ -21,16 +25,26 @@
 
   const ticks = $derived.by(() => {
     const top = Math.max(1e-12, ...xs.map(columnTotal));
-    const raw = top / 4;
-    const mag = 10 ** Math.floor(Math.log10(raw));
-    const step = [1, 2, 5, 10].map((k) => k * mag).find((s) => s >= raw)!;
-    const count = Math.ceil(top / step);
-    return Array.from({ length: count + 1 }, (_, i) => i * step);
+    const step = niceStep(top / 4);
+    return Array.from({ length: Math.ceil(top / step) + 1 }, (_, i) => i * step);
   });
   const yMax = $derived(ticks[ticks.length - 1]!);
   const y = (p: number) => m.top + plotH - (p / yMax) * plotH;
 
-  const labelEvery = $derived(Math.max(1, Math.ceil(44 / band)));
+  const xOfValue = (v: number) => m.left + ((v - lo + 0.5) / span) * plotW;
+  /** Center of the value at index `i`. */
+  const xAt = (i: number) => (dense ? xOfValue(xs[i]!) : m.left + (i + 0.5) * band);
+
+  const xLabels = $derived.by(() => {
+    if (!dense) {
+      const every = Math.max(1, Math.ceil(44 / band));
+      return xs.flatMap((v, i) => (i % every === 0 ? [{ x: xAt(i), v }] : []));
+    }
+    const step = niceStep(span / (plotW / 60));
+    const out: { x: number; v: number }[] = [];
+    for (let v = Math.ceil(lo / step) * step; v < lo + span; v += step) out.push({ x: xOfValue(v), v });
+    return out;
+  });
 
   interface Bar {
     x: number;
@@ -43,6 +57,7 @@
 
   const bars = $derived.by(() => {
     const out: Bar[] = [];
+    if (dense) return out;
     xs.forEach((value, i) => {
       const left = m.left + i * band + gap / 2;
       if (stacked) {
@@ -69,10 +84,74 @@
     return out;
   });
 
-  function path(b: Bar): string {
+  function barPath(b: Bar): string {
     const r = b.rounded ? Math.min(4, b.w / 2, b.h) : 0;
     const bottom = b.y + b.h;
     return `M${b.x},${bottom}V${b.y + r}Q${b.x},${b.y} ${b.x + r},${b.y}H${b.x + b.w - r}Q${b.x + b.w},${b.y} ${b.x + b.w},${b.y + r}V${bottom}Z`;
+  }
+
+  /**
+   * Dense mode: one point per pixel column, at the value with the highest
+   * probability in that column. Stacked series become bands, others lines.
+   */
+  const shapes = $derived.by(() => {
+    if (!dense) return [];
+    const columns = Math.max(1, Math.floor(plotW));
+    const pick: (number | undefined)[] = new Array(columns);
+    const best = new Float64Array(columns);
+    for (const v of xs) {
+      const c = Math.min(columns - 1, Math.floor(((v - lo) / span) * columns));
+      const t = columnTotal(v);
+      if (pick[c] === undefined || t > best[c]!) {
+        pick[c] = v;
+        best[c] = t;
+      }
+    }
+    const cx = (c: number) => (m.left + ((c + 0.5) / columns) * plotW).toFixed(1);
+    const level = (c: number, upTo: number) => {
+      const v = pick[c];
+      if (v === undefined || upTo < 0) return 0;
+      if (!stacked) return series[upTo]!.values.get(v) ?? 0;
+      let sum = 0;
+      for (let k = 0; k <= upTo; k++) sum += series[k]!.values.get(v) ?? 0;
+      return sum;
+    };
+    const edge = (c: number) => (m.left + (c / columns) * plotW).toFixed(1);
+    return series.map((s, k) => {
+      if (!stacked) {
+        const line: string[] = [];
+        for (let c = 0; c < columns; c++) line.push(`${cx(c)},${y(level(c, k)).toFixed(1)}`);
+        return { color: s.color, d: `M${line.join("L")}`, fill: false };
+      }
+      // Steps, so that a value on its own stays one column wide.
+      const outline: string[] = [];
+      for (let c = 0; c < columns; c++) {
+        const top = y(level(c, k)).toFixed(1);
+        outline.push(`${edge(c)},${top}`, `${edge(c + 1)},${top}`);
+      }
+      for (let c = columns - 1; c >= 0; c--) {
+        const bottom = y(level(c, k - 1)).toFixed(1);
+        outline.push(`${edge(c + 1)},${bottom}`, `${edge(c)},${bottom}`);
+      }
+      return { color: s.color, d: `M${outline.join("L")}Z`, fill: true };
+    });
+  });
+
+  function onMove(e: PointerEvent) {
+    const px = e.offsetX - m.left;
+    if (!dense) {
+      hover = Math.min(xs.length - 1, Math.max(0, Math.floor(px / band)));
+      return;
+    }
+    const target = lo + (px / plotW) * span - 0.5;
+    let a = 0;
+    let b = xs.length - 1;
+    while (a < b) {
+      const mid = (a + b) >> 1;
+      if (xs[mid]! < target) a = mid + 1;
+      else b = mid;
+    }
+    hover = a > 0 && target - xs[a - 1]! < xs[a]! - target ? a - 1 : a;
   }
 
   const atLeast = (value: number) =>
@@ -90,33 +169,45 @@
     {/each}
 
     {#if hover !== null}
-      <rect class="highlight" x={m.left + hover * band} y={m.top} width={band} height={plotH} />
+      {#if dense}
+        <line class="cursor" x1={xAt(hover)} x2={xAt(hover)} y1={m.top} y2={m.top + plotH} />
+      {:else}
+        <rect class="highlight" x={m.left + hover * band} y={m.top} width={band} height={plotH} />
+      {/if}
     {/if}
 
     {#each bars as b}
-      <path d={path(b)} fill={b.color} />
+      <path d={barPath(b)} fill={b.color} />
     {/each}
-
-    {#each xs as value, i}
-      {#if i % labelEvery === 0}
-        <text x={m.left + (i + 0.5) * band} y={height - m.bottom + 18} text-anchor="middle">{value}</text>
-      {/if}
-      <rect
-        class="hit"
-        role="presentation"
-        x={m.left + i * band}
-        y={m.top}
-        width={band}
-        height={plotH}
-        onpointerenter={() => (hover = i)}
-        onpointerleave={() => (hover = null)}
+    {#each shapes as s}
+      <path
+        d={s.d}
+        fill={s.fill ? s.color : "none"}
+        stroke={s.fill ? "none" : s.color}
+        stroke-width="2"
+        stroke-linejoin="round"
       />
     {/each}
+
+    {#each xLabels as l}
+      <text x={l.x} y={height - m.bottom + 18} text-anchor="middle">{l.v}</text>
+    {/each}
+
+    <rect
+      class="hit"
+      role="presentation"
+      x={m.left}
+      y={m.top}
+      width={plotW}
+      height={plotH}
+      onpointermove={onMove}
+      onpointerleave={() => (hover = null)}
+    />
   </svg>
 
   {#if hover !== null}
     {@const value = xs[hover]!}
-    {@const cx = m.left + (hover + 0.5) * band}
+    {@const cx = xAt(hover)}
     <div class="tooltip" style:left="{cx}px" class:flip={cx > width / 2}>
       <strong>{value}</strong>
       {#each series as s}
@@ -153,6 +244,9 @@
     stroke: var(--grid);
   }
   .axis {
+    stroke: var(--axis);
+  }
+  .cursor {
     stroke: var(--axis);
   }
   .highlight {
