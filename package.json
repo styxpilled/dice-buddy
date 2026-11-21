@@ -1,0 +1,11 @@
+{
+  "name": "dice-buddy-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm --filter dice-buddy test",
+    "dev": "pnpm --filter dice-buddy build && pnpm --filter web dev"
+  },
+  "packageManager": "pnpm@12.18.0"
+}

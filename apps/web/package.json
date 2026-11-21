@@ -1,0 +1,19 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/svelte": "^9.1.6",
+    "astro": "^7.4.13",
+    "dice-buddy": "workspace:*",
+    "svelte": "^5.58.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

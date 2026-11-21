@@ -1,0 +1,16 @@
+export function formatPercent(p: number): string {
+  if (p === 0) return "0%";
+  const x = p * 100;
+  if (x < 0.01) return "<0.01%";
+  return `${Number(x.toFixed(x >= 10 ? 1 : 2))}%`;
+}
+
+export function formatNumber(x: number): string {
+  return String(Number(x.toFixed(2)));
+}
+
+export interface ChartSeries {
+  name: string;
+  color: string;
+  values: Map<number, number>;
+}
